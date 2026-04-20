@@ -1,0 +1,169 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} { 
+      allow read, write: if false; 
+    }
+
+    // --- PRIMITIVE HELPERS ---
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
+    
+    function isValidId(id) { 
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    
+    function incoming() { 
+      return request.resource.data; 
+    }
+    
+    function existing() { 
+      return resource.data; 
+    }
+
+    // --- VALIDATION BLUEPRINTS ---
+    
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'createdAt'])
+        && data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128
+        && data.uid == request.auth.uid
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.createdAt is timestamp
+        && (data.keys().hasOnly(['uid', 'name', 'avatar', 'createdAt']))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500));
+    }
+
+    function isValidStream(data) {
+      return data.keys().hasAll(['creatorId', 'creatorName', 'creatorAvatar', 'title', 'videoUrl', 'isActive', 'viewerCount', 'createdAt'])
+        && data.creatorId is string && data.creatorId == request.auth.uid 
+        && data.creatorName is string && data.creatorName.size() <= 100
+        && data.creatorAvatar is string && data.creatorAvatar.size() <= 500
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.videoUrl is string && data.videoUrl.size() > 0 && data.videoUrl.size() <= 500
+        && data.isActive is bool
+        && data.viewerCount is number && data.viewerCount >= 0
+        && data.createdAt is timestamp
+        && (data.keys().hasOnly(['creatorId', 'creatorName', 'creatorAvatar', 'title', 'videoUrl', 'isActive', 'viewerCount', 'products', 'createdAt', 'pricePerView']))
+        && (!('products' in data) || (data.products is list && data.products.size() <= 20))
+        && (!('pricePerView' in data) || (data.pricePerView is number && data.pricePerView >= 0));
+    }
+
+    function isValidPoll(data, streamId) {
+      return data.keys().hasAll(['streamId', 'question', 'options', 'isActive', 'createdAt'])
+        && data.streamId is string && data.streamId == streamId
+        && data.question is string && data.question.size() > 0 && data.question.size() <= 200
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.options is list && data.options.size() > 0 && data.options.size() <= 10
+        && (data.keys().hasOnly(['streamId', 'question', 'options', 'isActive', 'createdAt']));
+    }
+
+    function isValidMessage(data, streamId) {
+      return data.keys().hasAll(['streamId', 'userId', 'userName', 'text', 'createdAt'])
+        && data.streamId == streamId
+        && data.userId == request.auth.uid
+        && data.userName is string && data.userName.size() <= 100
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 500
+        && data.createdAt is timestamp
+        && data.keys().hasOnly(['streamId', 'userId', 'userName', 'text', 'createdAt']);
+    }
+
+    // --- RESOURCES ---
+
+    match /users/{userId} {
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid; 
+      allow get: if isValidId(userId); // Public profile reads
+      allow create: if isSignedIn() 
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidUser(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() 
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && existing().uid == request.auth.uid
+        && isValidUser(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'avatar']);
+    }
+
+    match /streams/{streamId} {
+      allow get: if isValidId(streamId);
+      allow list: if resource.data.isActive == true; // Only allow listing active streams, public read
+      
+      allow create: if isSignedIn()
+        && isValidId(streamId)
+        && isValidStream(incoming())
+        && incoming().createdAt == request.time;
+        
+      allow update: if isSignedIn()
+        && isValidId(streamId)
+        && existing().creatorId == request.auth.uid
+        && isValidStream(incoming())
+        && incoming().creatorId == existing().creatorId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'isActive', 'viewerCount', 'products', 'pricePerView']);
+        
+      match /access/{userId} {
+        allow get: if isValidId(streamId) && isValidId(userId);
+        allow list: if false; // Scrape protection
+        // This is a demo endpoint rule letting users mock "purchasing access" on the client
+        allow create: if isSignedIn()
+          && isValidId(streamId) && isValidId(userId)
+          && userId == request.auth.uid
+          && incoming().keys().hasOnly(['grantedAt'])
+          && incoming().keys().hasAll(['grantedAt'])
+          && incoming().grantedAt == request.time;
+      }
+      
+      match /polls/{pollId} {
+        allow get: if isValidId(streamId) && isValidId(pollId);
+        allow list: if isValidId(streamId) && resource.data.streamId == streamId;
+        
+        allow create: if isSignedIn()
+          && isValidId(streamId) && isValidId(pollId)
+          && isValidPoll(incoming(), streamId)
+          && get(/databases/$(database)/documents/streams/$(streamId)).data.creatorId == request.auth.uid
+          && incoming().createdAt == request.time;
+          
+        allow update: if isSignedIn()
+          && isValidId(streamId) && isValidId(pollId)
+          && existing().streamId == streamId
+          && get(/databases/$(database)/documents/streams/$(streamId)).data.creatorId == request.auth.uid
+          && isValidPoll(incoming(), streamId)
+          && incoming().streamId == existing().streamId
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['isActive', 'options']);
+          
+        match /votes/{userId} {
+           allow get: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
+           allow list: if false; 
+           allow create: if isSignedIn()
+             && isValidId(userId)
+             && userId == request.auth.uid
+             && incoming().keys().hasAll(['userId', 'optionId'])
+             && incoming().keys().hasOnly(['userId', 'optionId'])
+             && incoming().userId == request.auth.uid
+             && incoming().optionId is string && incoming().optionId.size() > 0 && incoming().optionId.size() <= 128
+             && get(/databases/$(database)/documents/streams/$(streamId)/polls/$(pollId)).data.isActive == true;
+        }
+      }
+      
+      match /messages/{messageId} {
+        allow get: if isValidId(streamId) && isValidId(messageId);
+        allow list: if isValidId(streamId) && resource.data.streamId == streamId;
+        
+        allow create: if isSignedIn()
+          && isValidId(streamId) && isValidId(messageId)
+          && isValidMessage(incoming(), streamId)
+          && incoming().createdAt == request.time
+          && get(/databases/$(database)/documents/streams/$(streamId)).data.isActive == true;
+      }
+    }
+  }
+}

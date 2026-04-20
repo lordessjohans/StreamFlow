@@ -1,0 +1,6 @@
+{
+  "name": "VibeFlow",
+  "description": "A social streaming platform with live commerce, real-time engagement (polls & Q&A), and AI recommendations.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": []
+}

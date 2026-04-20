@@ -1,0 +1,103 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile containing basic info, purchase history, and role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "avatar": { "type": "string" },
+        "createdAt": { "type": "number", "description": "Server Timestamp" }
+      },
+      "required": ["uid", "name", "createdAt"]
+    },
+    "Stream": {
+      "title": "Stream",
+      "description": "Live broadcast metadata with reference to creator.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "title": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "viewerCount": { "type": "number" },
+        "products": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Array of product document IDs"
+        },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["creatorId", "title", "videoUrl", "isActive", "viewerCount", "createdAt"]
+    },
+    "Poll": {
+      "title": "Poll",
+      "description": "Poll tied to a specific stream. Implemented as a subcollection of Stream.",
+      "type": "object",
+      "properties": {
+        "streamId": { "type": "string" },
+        "question": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "votes": { "type": "number" }
+            }
+          }
+        },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["streamId", "question", "options", "isActive", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A single chat message in a stream subcollection.",
+      "type": "object",
+      "properties": {
+        "streamId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "text": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["streamId", "userId", "userName", "text", "createdAt"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "User's vote on a specific poll.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "optionId": { "type": "string" }
+      },
+      "required": ["userId", "optionId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Public user profiles."
+    },
+    "/streams/{streamId}": {
+      "schema": { "$ref": "#/entities/Stream" },
+      "description": "Central collection for streams."
+    },
+    "/streams/{streamId}/polls/{pollId}": {
+      "schema": { "$ref": "#/entities/Poll" },
+      "description": "Poll subcollection for real-time stream questions."
+    },
+    "/streams/{streamId}/polls/{pollId}/votes/{userId}": {
+      "schema": { "$ref": "#/entities/Vote" },
+      "description": "Ledger of votes. Document ID is the userId to prevent duplicate voting."
+    },
+    "/streams/{streamId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Real-time chat messages for a specific stream."
+    }
+  }
+}
